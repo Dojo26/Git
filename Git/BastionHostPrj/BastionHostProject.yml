@@ -1,10 +1,10 @@
 AwsAWSTemplateFormatVersion: '2010-09-09'
 Description: AWS CloudFormation template for creating a bastion host and Ec2 session manager
 Resources:
- #IamRoleforBastionHost
+  #IamRoleforBastionHost
  BastionHostIAMRole:
- Type: AWS::IAM::Role
- Properties:
+  Type: AWS::IAM::Role
+  Properties:
    AssumeRolePolicyDocument: json
      Version: '2012-10-17'
    Statement:
@@ -25,14 +25,70 @@ Resources:
                - ec2:DeleteNetworkInterface
                - ec2:DescribeNetworkInterfaces
              Resource: "*"
-   #Vpc
+  #Vpc
    Vpc:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: String
-      Ipv4IpamPoolId: 10.0.0.0\16
+      CidrBlock: 10.0.0.0\16
+      Ipv4IpamPoolId: !Ref VpcIpamPoolId
+      Ipv4NetmaskLength: 16
+  #MyInternetGateway
+   InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MyInternetGateway 
+  #AttachInternetGateway
+   AttachInternetGateway:
+      Type: AWS::EC2::VPCGatewayAttachment
+      Properties:
+       VpcId: !Ref Vpc
+       InternetGatewayId: !Ref InternetGateway
+  #PublicSubnet
+   PublicSubnet:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref Vpc
+        CidrBlock: 10.0.1.0/24
+        AvailabilityZone: !Select [ 0, !GetAZs 'us-east-1' ]
+        MapPublicIpOnLaunch: true
+    
+  #PrivateSubnet
+     PrivateSubnet:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref Vpc
+        CidrBlock:10.0.2.0/24
+        AvailabilityZone: !Select [ 0, !GetAZs 'us-east-1' ]
+        MapPublicIpOnLaunch: false
+        Tags:
+          - Key: Name
+            Value: PrivateSubnet
 
- #BastionHostSecurityGroup
+  #PublicRouteTable
+   Type: AWS::EC2::RouteTable
+   Properties:
+     Tags: 
+     - Tag
+   VpcId: !Ref Vpc
+
+  #PublicRoute
+   PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  #PublicSubnetRouteTableAssociation
+   PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+       RouteTableId: !Ref PublicRouteTable
+       SubnetId: !Ref PublicSubnet
+
+  #BastionHostSecurityGroup
   BastionHostSecurityGroup:
    Type: AWS::EC2::SecurityGroup 
    Properties:
@@ -43,45 +99,28 @@ Resources:
         FromPort: 22
         ToPort: 22
         CidrIp: 0.0.0.0/0
-      - IpProtocol: tcp
-        FromPort: 80
-        ToPort: 80
-        CidrIp: 0.0.0.0/0
     SecurityGroupEgress:
       - IpProtocol: tcp
         FromPort: 22
         ToPort: 22
         CidrIp: 0.0.0.0/0
-      - IpProtocol: tcp
-        FromPort: 80
-        ToPort: 80
-        CidrIp: 0.0.0.0/0
 
   #PrivateEc2InstanceSecurityGroup
    PrivateEc2InstanceSecurityGroup:
-    Type: AWS::EC2::SecurityGroup 
-    Properties:
-    GroupDescription: Allow SSH 
-    VpcId: !Ref Vpc
-    SecurityGroupIngress:
+   Type: AWS::EC2::SecurityGroup 
+      Properties:
+      GroupDescription: Allow SSH 
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: 22
         ToPort: 22
-        CidrIp:
-        - !Ref BastionHostSecurityGroup
-
- #Privatesubnet
-    PrivateSubnet:
-     Type: AWS::EC2::Subnet
-     Properties:
-       VpcId: !Ref Vpc
-       CidrBlock: 10.0.0.0/24
-       AvailabilityZone: us-east-1a
-       
+        SourceSecurityGroupId: !Ref BastionHostSecurityGroup
+   
   #BastionHostEC2Instance
    BastionHostInstance: 
-    Type: AWS::EC2::Instance
-    Properties: 
+   Type: AWS::EC2::Instance
+     Properties: 
       ImageId: "ami-XXXXXXXXX"
       KeyName: "testkeyXXXX"
       InstanceType: t2.micro
@@ -90,30 +129,73 @@ Resources:
         - !Ref BastionHostSecurityGroup
       SubnetId: !Ref Vpc
 
-   #PrivateEc2Instance
+  #PrivateEc2Instance
    PrivateEc2InstanceInstance: 
-    Type: AWS::EC2::Instance
-    Properties: 
+   Type: AWS::EC2::Instance
+     Properties: 
       ImageId: "ami-XXXXXXXXX"
       KeyName: "testkeyXXXX"
       InstanceType: t2.micro
       IamInstanceProfile: !Ref BastionHostIAMRole
       SecurityGroupIds:
         - !Ref PrivateEc2InstanceSecurityGroup
-      SubnetId: !Ref Vpc
+      SubnetId: !Ref PrivateSubnet
+      UserData: !Base64 
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash -xe
+            - |
+              # Get the latest CloudFormation package
+            - |
+              yum install -y aws-cfn-bootstrap
+            - |
+              # Start cfn-init
+            - '/opt/aws/bin/cfn-init -s '
+            - !Ref 'AWS::StackId'
+            - ' -r WebServerHost '
+            - ' --region '
+            - !Ref 'AWS::Region'
+            - |2
+               || error_exit 'Failed to run cfn-init'
+            - >
+              # Start up the cfn-hup daemon to listen for changes to the EC2
+              instance metadata
+            - |
+              /opt/aws/bin/cfn-hup || error_exit 'Failed to start cfn-hup'
+            - |
+              # Get the CloudWatch Logs agent
+            - >
+              wget
+              https://s3.amazonaws.com/aws-cloudwatch/downloads/latest/awslogs-agent-setup.py
+            - |
+              # Install the CloudWatch Logs agent
+            - 'python awslogs-agent-setup.py -n -r '
+            - !Ref 'AWS::Region'
+            - |2
+               -c /tmp/cwlogs/apacheaccess.conf || error_exit 'Failed to run CloudWatch Logs agent setup'
+            - |
+              # All done so signal success
+            - '/opt/aws/bin/cfn-signal -e $? '
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource WebServerHost '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - |+
 
  #S3Bucket for Storing logs
-  S3BucketForLogs:
+ S3BucketForLogs:
     Type: 'AWS::S3::Bucket'
     Properties:
       LoggingConfiguration:
         DestinationBucketName: !Ref S3BucketForLogs
         LogFilePrefix: testing-logs
-  LoggingBucket:
-    Type: 'AWS::S3::Bucket'
-  S3BucketPolicy:
-    Type: 'AWS::S3::BucketPolicy'
-    Properties:
+      LoggingBucket:
+   Type: 'AWS::S3::Bucket'
+ S3BucketPolicy:
+   Type: 'AWS::S3::BucketPolicy'
+   Properties:
       Bucket: !Ref LoggingBucket
       PolicyDocument:
         Version: 2012-10-17
@@ -123,6 +205,49 @@ Resources:
             Effect: Allow
             Principal:
               Service: logging.s3.amazonaws.com
+  #logging Role
+   LogRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: LogRolePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:Create*'
+                  - 'logs:PutLogEvents'
+                  - 's3:GetObject'
+                Resource:
+                  - 'arn:aws:logs:*:*:*'
+                  - 'arn:aws:s3:::*'
+   LogRoleInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: /
+      Roles:
+        - !Ref LogRole
+
+  #BastionHostLogGroup
+    BastionHostLogGroup:
+      Type: 'AWS::Logs::LogGroup'
+      Properties:
+        LogGroupName: !Ref BastionHostLogGroup
+        RetentionInDays: 7
+        Tags:
+          - Key: Name
+            Value: BastionHostLogGroup
             
   
              
