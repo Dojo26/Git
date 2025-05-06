@@ -1,0 +1,171 @@
+AwsAWSTemplateFormatVersion: '2010-09-09'
+Description: AWS CloudFormation template for creating a serverless event-driven data processing pipeline
+Parameters:
+ #Cloudtrail to monitor logs
+  CloudtrailLog:
+    Description: CloudTrailEventLog
+    Type: String
+    Default: value
+Resources:
+    #IAM Role and Policy
+  LambdaExecutionRole:
+   Type: AWS::IAM::Role
+   Properties:
+   AssumeRolePolicyDocument: 
+     Version: '2012-10-17'
+     Statement:
+       - Effect: Allow
+         Principal:
+           Service: lambda.amazonaws.com
+         Action: sts:AssumeRole
+   Policies: 
+     - PolicyName: LambdaExecutionPolicy
+       PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+           - s3:GetObject
+           - s3:PutObject
+           - sns:Publish
+           - sns:Subscribe
+           - dynamodb:PutItem
+           - dynamodb:GetItem
+           - dynamodb:UpdateItem
+          Resources: "*"
+
+   #Lambda Permission for s3 to invoke the Lambda function
+  LambdaPermission:
+     Type: AWS::Lambda::Permission
+     Properties:
+       Action: lambda:invokeFunction
+       FunctionName: arn:aws:lambda:us-east-1:XXXXXXXXXXXXXXX:function:MyLambdaFunction
+       Principal: s3.amazonaws.com
+       SourceAccount: XXXXXXXXXXXXX
+       SourceArn: arn:aws:s3:XXXXXXXXXX
+       
+  #Lambda function for data processing that writes to Rds
+  LambdaFileProcessing:
+   Type: AWS::Lambda::Function
+   Properties:
+     FunctionName: ServerlessLambdaFunction
+     Runtime: python3.10
+     Handler: index.handler
+     Role: !ImportValue LambdaExecutionRoleArn
+     Code:
+       S3Bucket: !Ref S3DataBucket
+       S3Key: lambda.zip
+  #S3 Bucket for data storage (Triggers the Lambda function)
+  S3DataBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+    BucketName: S3DataDrivenBucket
+    VersioningConfiguration: 
+         Status: Enabled
+    NotificationConfiguration:
+    LambdaConfigurations:
+           -   Event: s3:ObjectCreated:*
+           -   Function: !ImportValue MyLambdaFunctionArn
+
+  #S3 Bucket for Parsed notification (Not for triggering)
+  S3ParsedDataBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+    - BucketName: S3ParsedBucket
+
+   #DynamoDB Table for storing processed data
+   DynamoDBTable1:
+     Type: AWS::DynamoDB::Table
+     Properties:
+       AttributeDefinitions: 
+         - AttributeName: id
+           AttributeType: S
+       KeySchema: 
+         - AttributeName: id
+           KeyType: HASH
+       BillingMode: PAY_PER_REQUEST
+       TableName: ProcessedDataTable
+  Tags: 
+    - Tag
+  #SNS Topic to send to users
+  SNSTopic:
+  Type: AWS::SNS::Topic
+  Properties:
+    DisplayName: "Serverless Successful File Processing"
+    Subscription:
+      - Endpoint: "Daramola.ojo26@gmail.com" 
+        Protocol: "Daramola.ojo26@gmail.com"      
+    TopicName: "SuccessfulFileProcessing"
+
+  #CloudTrail to monitor all log events
+  CloudtrailLogs:
+   Type: AWS::CloudTrail::Trail
+   Properties:
+    S3BucketName: !Ref S3DataBucket
+    IsLogging: true
+    TrailName: !Ref TrailName
+    EnableLogFileValidation: true
+    CloudWatchLogsLogGroupArn: 
+      Fn::ImportValue: "TrailLogGroupTestArnXXXXX"
+    CloudWatchLogsRoleArn: 
+      Fn::ImportValue: "TrailLogGroupRoleTestArnXXXXXX"
+    KMSKeyId: 
+      Fn::ImportValue: "TrailTopicTest"
+    EventSelectors:
+      - ReadWriteType: All
+        IncludeManagementEvents: true
+        DataResources:
+          - Type: AWS::S3::Object
+            Values:
+              - arn:aws:s3:::S3DataBucket/
+              - arn:aws:s3:::S3ParsedDataBucket/
+    AdvancedEventSelectors:
+      - Name: "Log management events"
+        FieldSelectors:
+          - Field: "eventCategory"
+            Equals: [ "Management" ]
+      - Name: "Exclude S3 data events for the log bucket"
+        FieldSelectors:
+          - Field: "eventCategory"
+            Equals: [ "Data" ]
+          - Field: "resources.type"
+            Equals: "AWS::S3::Object"
+          - Field: "resources.ARN"
+            NotStartsWith: "arn:aws:s3:::LogBucketARN"
+Outputs:
+  ARN:
+    Description: The trail ARN
+    Value:
+      Fn::GetAtt:
+        - CloudtrailLogs
+        - Arn
+  TopicArn:
+    Description: The SNS Topic ARN
+    Value:
+      Fn::GetAtt:
+        - CloudtrailLogs
+        - SnsTopicArn
+
+  #Output S3 Bucket for data storage
+  BucketName:
+    Value: !Ref S3DataBucket
+    Export:
+      Name: S3DataBucketName
+
+  #Output Lambda File Processing Function
+  LambdaFunctionArn:
+    Value: !GetAtt LambdaFileProcessing.Arn
+    Export:
+      Name: LambdaFileProcessingArn
+  
+  #Output for Lambda Permission
+  LambdaExecutionRoleArn:
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: LambdaExecutionRoleArn
+
+  #Output for DynamoDB Table
+  DynamoDBTableName:
+    Value: !Ref DynamoDBTable
+    Export:
+      Name: DynamoDBTableName1
