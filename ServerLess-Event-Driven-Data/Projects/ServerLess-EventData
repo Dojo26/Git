@@ -34,7 +34,7 @@ Resources:
            - dynamodb:UpdateItem
           Resources: "*"
 
-   #Lambda Permission for s3 to invoke the Lambda function
+  #Lambda Permission for s3 to invoke the Lambda function
   LambdaPermission:
      Type: AWS::Lambda::Permission
      Properties:
@@ -53,7 +53,7 @@ Resources:
      Handler: index.handler
      Role: !ImportValue LambdaExecutionRoleArn
      Code:
-       S3Bucket: !Ref S3DataBucket
+       S3Bucket: !Ref S3DataBucket #fixme
        S3Key: lambda.zip
   #S3 Bucket for data storage (Triggers the Lambda function)
   S3DataBucket:
@@ -73,7 +73,7 @@ Resources:
     Properties:
     - BucketName: S3ParsedBucket
 
-   #DynamoDB Table for storing processed data
+  #DynamoDB Table for storing processed data
    DynamoDBTable1:
      Type: AWS::DynamoDB::Table
      Properties:
@@ -85,8 +85,8 @@ Resources:
            KeyType: HASH
        BillingMode: PAY_PER_REQUEST
        TableName: ProcessedDataTable
-  Tags: 
-    - Tag
+     Tags: 
+     - Tag
   #SNS Topic to send to users
   SNSTopic:
   Type: AWS::SNS::Topic
@@ -103,7 +103,7 @@ Resources:
    Properties:
     S3BucketName: !Ref S3DataBucket
     IsLogging: true
-    TrailName: !Ref TrailName
+    TrailName: !Ref CloudtrailLogs
     EnableLogFileValidation: true
     CloudWatchLogsLogGroupArn: 
       Fn::ImportValue: "TrailLogGroupTestArnXXXXX"
