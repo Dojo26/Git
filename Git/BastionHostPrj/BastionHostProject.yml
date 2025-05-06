@@ -1,0 +1,135 @@
+AwsAWSTemplateFormatVersion: '2010-09-09'
+Description: AWS CloudFormation template for creating a bastion host and Ec2 session manager
+Resources:
+ #IamRoleforBastionHost
+ BastionHostIAMRole:
+ Type: AWS::IAM::Role
+ Properties:
+   AssumeRolePolicyDocument: json
+     Version: '2012-10-17'
+   Statement:
+       - Effect: Allow
+         Principal:
+           Service: ec2.amazonaws.com
+         Action: sts:AssumeRole
+   Policies:
+     - PolicyName: BastionHostPolicy
+       PolicyDocument:
+         Version: '2012-10-17'
+         Statement:
+           - Effect: Allow
+             Action:
+               - ec2:DescribeInstances
+               - ec2:DescribeSecurityGroups
+               - ec2:CreateNetworkInterface
+               - ec2:DeleteNetworkInterface
+               - ec2:DescribeNetworkInterfaces
+             Resource: "*"
+   #Vpc
+   Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: String
+      Ipv4IpamPoolId: 10.0.0.0\16
+
+ #BastionHostSecurityGroup
+  BastionHostSecurityGroup:
+   Type: AWS::EC2::SecurityGroup 
+   Properties:
+    GroupDescription: Allow SSH & HTTP traffic
+    VpcId: !Ref Vpc
+    SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+    SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+
+  #PrivateEc2InstanceSecurityGroup
+   PrivateEc2InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup 
+    Properties:
+    GroupDescription: Allow SSH 
+    VpcId: !Ref Vpc
+    SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp:
+        - !Ref BastionHostSecurityGroup
+
+ #Privatesubnet
+    PrivateSubnet:
+     Type: AWS::EC2::Subnet
+     Properties:
+       VpcId: !Ref Vpc
+       CidrBlock: 10.0.0.0/24
+       AvailabilityZone: us-east-1a
+       
+  #BastionHostEC2Instance
+   BastionHostInstance: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: "ami-XXXXXXXXX"
+      KeyName: "testkeyXXXX"
+      InstanceType: t2.micro
+      IamInstanceProfile: !Ref BastionHostIAMRole
+      SecurityGroupIds:
+        - !Ref BastionHostSecurityGroup
+      SubnetId: !Ref Vpc
+
+   #PrivateEc2Instance
+   PrivateEc2InstanceInstance: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: "ami-XXXXXXXXX"
+      KeyName: "testkeyXXXX"
+      InstanceType: t2.micro
+      IamInstanceProfile: !Ref BastionHostIAMRole
+      SecurityGroupIds:
+        - !Ref PrivateEc2InstanceSecurityGroup
+      SubnetId: !Ref Vpc
+
+ #S3Bucket for Storing logs
+  S3BucketForLogs:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      LoggingConfiguration:
+        DestinationBucketName: !Ref S3BucketForLogs
+        LogFilePrefix: testing-logs
+  LoggingBucket:
+    Type: 'AWS::S3::Bucket'
+  S3BucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref LoggingBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - 's3:PutObject'
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            
+  
+             
+                
+               
+            
+              
+                
+
+
