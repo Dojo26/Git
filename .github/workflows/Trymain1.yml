@@ -1,0 +1,12 @@
+name: Self-hosted runner test
+on:
+  push:
+    branches: [ main ]
+jobs:
+  test:
+    runs-on: self-hosted, linux, X64   
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo "Runner: $RUNNER_NAME"
+          uname -a
